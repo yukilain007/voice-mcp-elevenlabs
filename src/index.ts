@@ -1,10 +1,10 @@
 /**
- * voice-mcp
- * 
+ * voice-mcp (ElevenLabs Edition)
+ *
  * An MCP server for AI voice synthesis with inline audio player.
- * Supports MiniMax TTS API with custom voice cloning.
- * 
- * GitHub: https://github.com/garan0613/voice-mcp
+ * Uses ElevenLabs TTS API. Forked from garan0613/voice-mcp.
+ *
+ * Original: https://github.com/garan0613/voice-mcp
  * License: MIT
  */
 
@@ -17,27 +17,9 @@ import { z } from "zod";
 // =============================================================================
 
 export interface Env {
-  // MiniMax API credentials
-  MINIMAX_API_KEY: string;
+  ELEVENLABS_API_KEY: string;
   VOICE_ID: string;
-  // Optional: custom bot name for display
   BOT_NAME?: string;
-}
-
-interface T2AResponse {
-  data?: {
-    audio?: string;
-    status?: number;
-  };
-  extra_info?: {
-    audio_length?: number;
-    audio_sample_rate?: number;
-    audio_size?: number;
-  };
-  base_resp?: {
-    status_code: number;
-    status_msg: string;
-  };
 }
 
 // =============================================================================
@@ -127,9 +109,9 @@ function getPlayerHTML(botName: string): string {
       gap: 4px;
     }
     .toggle-btn:hover { text-decoration: underline; }
-    .toggle-btn .arrow { 
+    .toggle-btn .arrow {
       display: inline-block;
-      transition: transform 0.2s; 
+      transition: transform 0.2s;
       font-size: 10px;
     }
     .toggle-btn.expanded .arrow { transform: rotate(90deg); }
@@ -181,32 +163,32 @@ function getPlayerHTML(botName: string): string {
     const BOT_NAME = '${botName}';
     let audio = null;
     let waveInterval = null;
-    
+
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
     }
-    
+
     function showError(msg) {
       contentEl.innerHTML = '<div class="error">' + escapeHtml(msg) + '</div>';
     }
-    
+
     function formatTime(sec) {
       const m = Math.floor(sec / 60);
       const s = Math.floor(sec % 60);
       return m + ':' + (s < 10 ? '0' : '') + s;
     }
-    
+
     function createWaveform() {
       const heights = [40, 70, 55, 85, 45, 90, 60, 75, 50, 80, 65, 55, 70, 45, 85, 50];
       return heights.map(h => '<div class="wave-bar" style="height:' + h + '%"></div>').join('');
     }
-    
+
     function renderPlayer(text, audioBase64) {
       const audioUrl = 'data:audio/mpeg;base64,' + audioBase64;
-      
-      contentEl.innerHTML = 
+
+      contentEl.innerHTML =
         '<div class="player">' +
           '<button class="play-btn" id="playBtn">' +
             '<svg viewBox="0 0 24 24"><path id="playIcon" d="M8 5v14l11-7z"/></svg>' +
@@ -219,7 +201,7 @@ function getPlayerHTML(botName: string): string {
         '</button>' +
         '<div class="text-bubble" id="textBubble">' + escapeHtml(text) + '</div>' +
         '<audio id="audio" src="' + audioUrl + '" preload="metadata"></audio>';
-      
+
       audio = document.getElementById('audio');
       const playBtn = document.getElementById('playBtn');
       const playIcon = document.getElementById('playIcon');
@@ -228,11 +210,11 @@ function getPlayerHTML(botName: string): string {
       const bars = waveform.querySelectorAll('.wave-bar');
       const toggleBtn = document.getElementById('toggleBtn');
       const textBubble = document.getElementById('textBubble');
-      
+
       audio.addEventListener('loadedmetadata', function() {
         durationEl.textContent = formatTime(audio.duration);
       });
-      
+
       playBtn.addEventListener('click', function() {
         if (audio.paused) {
           audio.play();
@@ -240,45 +222,45 @@ function getPlayerHTML(botName: string): string {
           audio.pause();
         }
       });
-      
+
       audio.addEventListener('play', function() {
         playBtn.classList.add('playing');
         playIcon.setAttribute('d', 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
         animateWave(bars, true);
       });
-      
+
       audio.addEventListener('pause', function() {
         playBtn.classList.remove('playing');
         playIcon.setAttribute('d', 'M8 5v14l11-7z');
         animateWave(bars, false);
       });
-      
+
       audio.addEventListener('ended', function() {
         playBtn.classList.remove('playing');
         playIcon.setAttribute('d', 'M8 5v14l11-7z');
         animateWave(bars, false);
         bars.forEach(b => b.classList.remove('active'));
       });
-      
+
       audio.addEventListener('timeupdate', function() {
         const progress = audio.currentTime / audio.duration;
         const activeCount = Math.floor(progress * bars.length);
         bars.forEach((b, i) => b.classList.toggle('active', i < activeCount));
       });
-      
+
       toggleBtn.addEventListener('click', function() {
         const isShow = textBubble.classList.toggle('show');
         toggleBtn.classList.toggle('expanded', isShow);
-        toggleBtn.innerHTML = isShow 
-          ? '<span class="arrow">▶</span> Hide transcript' 
+        toggleBtn.innerHTML = isShow
+          ? '<span class="arrow">▶</span> Hide transcript'
           : '<span class="arrow">▶</span> Show transcript';
       });
     }
-    
+
     function animateWave(bars, playing) {
       if (waveInterval) clearInterval(waveInterval);
       if (!playing) return;
-      
+
       waveInterval = setInterval(function() {
         bars.forEach(bar => {
           if (!bar.classList.contains('active')) {
@@ -287,27 +269,26 @@ function getPlayerHTML(botName: string): string {
         });
       }, 150);
     }
-    
+
     function handleData(data) {
       if (data.error) { showError(data.error); return; }
       if (data.audio_base64 && data.text) {
         renderPlayer(data.text, data.audio_base64);
       }
     }
-    
+
     function sendToHost(method, params, id) {
       const msg = { jsonrpc: '2.0', method: method, params: params || {} };
       if (id !== undefined) msg.id = id;
       window.parent.postMessage(msg, '*');
     }
-    
+
     let hostInitialized = false;
-    
+
     window.addEventListener('message', function(event) {
       const msg = event.data;
       if (!msg || typeof msg !== 'object') return;
-      
-      // Response to ui/initialize (id=1): send initialized only on success; show error and stop otherwise
+
       if (msg.jsonrpc === '2.0' && msg.id === 1 && !hostInitialized && msg.method === undefined) {
         if ('error' in msg) {
           showError('Initialization failed: ' + ((msg.error && msg.error.message) || 'unknown'));
@@ -319,7 +300,7 @@ function getPlayerHTML(botName: string): string {
         }
         return;
       }
-      
+
       if (msg.jsonrpc === '2.0') {
         if (msg.method === 'ui/notifications/tool-input') {
           contentEl.innerHTML = '<div class="loading">Generating voice...</div>';
@@ -332,8 +313,7 @@ function getPlayerHTML(botName: string): string {
       }
       if (msg.structuredContent) handleData(msg.structuredContent);
     });
-    
-    // Register the listener first, then send initialize; initialized is sent only after a successful response (see id===1 branch above)
+
     sendToHost('ui/initialize', {
       protocolVersion: '2026-01-26',
       appInfo: { name: 'voice-mcp', version: '1.1.0' },
@@ -345,58 +325,49 @@ function getPlayerHTML(botName: string): string {
 }
 
 // =============================================================================
-// MiniMax API Helper
+// ElevenLabs API Helper
 // =============================================================================
 
 async function generateAudio(env: Env, text: string): Promise<{ success: boolean; audio_base64?: string; error?: string }> {
   try {
-    const t2aUrl = "https://api.minimaxi.com/v1/t2a_v2";
-    
-    const response = await fetch(t2aUrl, {
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${env.VOICE_ID}`;
+
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${env.MINIMAX_API_KEY}`,
+        'xi-api-key': env.ELEVENLABS_API_KEY,
         'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg',
       },
       body: JSON.stringify({
-        model: 'speech-2.8-hd',
         text: text,
-        stream: false,
-        voice_setting: {
-          voice_id: env.VOICE_ID,
-          speed: 1.0,
-          vol: 1.0,
-          pitch: 0,
-        },
-        audio_setting: {
-          sample_rate: 32000,
-          format: 'mp3',
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.0,
+          use_speaker_boost: true,
         },
       }),
     });
 
-    const data = await response.json() as T2AResponse;
-    
-    if (data.base_resp && data.base_resp.status_code !== 0) {
-      return { success: false, error: data.base_resp.status_msg };
+    if (!response.ok) {
+      const errBody = await response.text();
+      return { success: false, error: `ElevenLabs API error ${response.status}: ${errBody}` };
     }
 
-    if (data.data?.audio) {
-      const hexString = data.data.audio;
-      const bytes = new Uint8Array(hexString.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-      
-      let binary = '';
-      const chunkSize = 8192;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        const chunk = bytes.slice(i, i + chunkSize);
-        binary += String.fromCharCode.apply(null, Array.from(chunk));
-      }
-      const base64Audio = btoa(binary);
-      
-      return { success: true, audio_base64: base64Audio };
-    }
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
 
-    return { success: false, error: 'Failed to generate audio' };
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.slice(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    const base64Audio = btoa(binary);
+
+    return { success: true, audio_base64: base64Audio };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -407,9 +378,9 @@ async function generateAudio(env: Env, text: string): Promise<{ success: boolean
 // =============================================================================
 
 function createVoiceServer(env: Env): McpServer {
-  const botName = env.BOT_NAME || 'AI';
+  const botName = env.BOT_NAME || 'River';
   const PLAYER_HTML = getPlayerHTML(botName);
-  
+
   const server = new McpServer({
     name: "voice-mcp",
     version: "1.0.0",
@@ -440,7 +411,7 @@ function createVoiceServer(env: Env): McpServer {
     "speak",
     {
       title: `${botName}'s Voice`,
-      description: `Make ${botName} speak with a custom cloned voice. The audio will play in an inline player.`,
+      description: `Make ${botName} speak with a cloned voice. The audio will play in an inline player.`,
       inputSchema: z.object({
         text: z.string().describe("Text to speak"),
       }),
@@ -451,7 +422,7 @@ function createVoiceServer(env: Env): McpServer {
     },
     async ({ text }) => {
       const result = await generateAudio(env, text);
-      
+
       if (result.success && result.audio_base64) {
         return {
           content: [
@@ -463,7 +434,7 @@ function createVoiceServer(env: Env): McpServer {
           },
         };
       }
-      
+
       return {
         content: [
           { type: "text" as const, text: `Voice generation failed: ${result.error}` },
@@ -514,6 +485,7 @@ export default {
         status: 'ok',
         service: 'voice-mcp',
         version: '1.0.0',
+        tts_provider: 'elevenlabs',
         voice_id: env.VOICE_ID ? 'configured' : 'not configured',
       }, { headers: corsHeaders });
     }
@@ -522,21 +494,21 @@ export default {
     if (path === '/speak' && request.method === 'GET') {
       const text = url.searchParams.get('text');
       if (!text) {
-        return Response.json({ error: 'Missing text parameter' }, { 
-          status: 400, 
-          headers: corsHeaders 
+        return Response.json({ error: 'Missing text parameter' }, {
+          status: 400,
+          headers: corsHeaders
         });
       }
 
       const result = await generateAudio(env, text);
-      
+
       if (result.success && result.audio_base64) {
         const binaryString = atob(result.audio_base64);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
-        
+
         return new Response(bytes, {
           headers: {
             ...corsHeaders,
@@ -546,15 +518,15 @@ export default {
         });
       }
 
-      return Response.json({ error: result.error }, { 
-        status: 500, 
-        headers: corsHeaders 
+      return Response.json({ error: result.error }, {
+        status: 500,
+        headers: corsHeaders
       });
     }
 
     // Landing page
     if (path === '/' || path === '') {
-      const botName = env.BOT_NAME || 'AI';
+      const botName = env.BOT_NAME || 'River';
       return new Response(
         `<!DOCTYPE html>
 <html><head>
@@ -565,11 +537,10 @@ export default {
   h1 { color: #07c160; }
   code { background: #f5f5f5; padding: 2px 8px; border-radius: 4px; font-size: 14px; }
   .section { margin: 24px 0; }
-  .endpoint { margin: 8px 0; }
   a { color: #07c160; }
 </style>
 </head><body>
-<h1>🎙️ voice-mcp</h1>
+<h1>🎙️ voice-mcp (ElevenLabs)</h1>
 <p>An MCP server for AI voice synthesis with inline audio player.</p>
 
 <div class="section">
@@ -580,21 +551,18 @@ export default {
 
 <div class="section">
 <h3>Direct API</h3>
-<div class="endpoint">
-  <code>GET /speak?text=Hello</code> — Get audio file directly
-</div>
-<div class="endpoint">
-  <code>GET /status</code> — Health check
-</div>
+<code>GET /speak?text=Hello</code> — Get audio file directly<br>
+<code>GET /status</code> — Health check
 </div>
 
 <div class="section">
 <h3>Configuration</h3>
 <p>Bot name: <strong>${botName}</strong></p>
+<p>TTS Provider: <strong>ElevenLabs</strong></p>
 </div>
 
 <p style="margin-top: 32px; color: #666; font-size: 14px;">
-  <a href="https://github.com/xxx/voice-mcp">GitHub</a> · MIT License
+  Based on <a href="https://github.com/garan0613/voice-mcp">garan0613/voice-mcp</a> · MIT License
 </p>
 </body></html>`,
         { headers: { 'Content-Type': 'text/html; charset=utf-8' } },
