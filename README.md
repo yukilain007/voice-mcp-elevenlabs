@@ -139,7 +139,7 @@ npm install
 npx wrangler login
 npx wrangler secret put ELEVENLABS_API_KEY
 npx wrangler secret put VOICE_ID
-npx wrangler secret put BOT_NAME  # 可选，默认 "River"
+npx wrangler secret put BOT_NAME  # 可选，默认 "AI"
 ```
 
 #### 4. 部署
