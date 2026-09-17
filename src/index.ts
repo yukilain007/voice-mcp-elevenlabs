@@ -123,9 +123,9 @@ function getPlayerHTML(botName: string): string {
       font-size: 14px;
       line-height: 1.6;
       color: #333;
-      display: none;
+      display: block;
     }
-    .text-bubble.show { display: block; }
+    .text-bubble.hidden { display: none; }
     .loading {
       text-align: center;
       color: #999;
@@ -196,8 +196,8 @@ function getPlayerHTML(botName: string): string {
           '<div class="waveform" id="waveform">' + createWaveform() + '</div>' +
           '<span class="duration" id="duration">0:00</span>' +
         '</div>' +
-        '<button class="toggle-btn" id="toggleBtn">' +
-          '<span class="arrow">▶</span> Show transcript' +
+        '<button class="toggle-btn expanded" id="toggleBtn">' +
+          '<span class="arrow">▶</span> Hide transcript' +
         '</button>' +
         '<div class="text-bubble" id="textBubble">' + escapeHtml(text) + '</div>' +
         '<audio id="audio" src="' + audioUrl + '" preload="metadata"></audio>';
@@ -249,11 +249,11 @@ function getPlayerHTML(botName: string): string {
       });
 
       toggleBtn.addEventListener('click', function() {
-        const isShow = textBubble.classList.toggle('show');
-        toggleBtn.classList.toggle('expanded', isShow);
-        toggleBtn.innerHTML = isShow
-          ? '<span class="arrow">▶</span> Hide transcript'
-          : '<span class="arrow">▶</span> Show transcript';
+        const isHidden = textBubble.classList.toggle('hidden');
+        toggleBtn.classList.toggle('expanded', !isHidden);
+        toggleBtn.innerHTML = isHidden
+          ? '<span class="arrow">▶</span> Show transcript'
+          : '<span class="arrow">▶</span> Hide transcript';
       });
     }
 
