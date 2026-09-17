@@ -378,7 +378,7 @@ async function generateAudio(env: Env, text: string): Promise<{ success: boolean
 // =============================================================================
 
 function createVoiceServer(env: Env): McpServer {
-  const botName = env.BOT_NAME || 'River';
+  const botName = env.BOT_NAME || 'AI';
   const PLAYER_HTML = getPlayerHTML(botName);
 
   const server = new McpServer({
@@ -526,7 +526,7 @@ export default {
 
     // Landing page
     if (path === '/' || path === '') {
-      const botName = env.BOT_NAME || 'River';
+      const botName = env.BOT_NAME || 'AI';
       return new Response(
         `<!DOCTYPE html>
 <html><head>

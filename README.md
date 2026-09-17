@@ -41,7 +41,7 @@ You'll need an [ElevenLabs](https://elevenlabs.io) account with a voice (cloned 
 npx wrangler login
 npx wrangler secret put ELEVENLABS_API_KEY
 npx wrangler secret put VOICE_ID
-npx wrangler secret put BOT_NAME  # Optional, defaults to "River"
+npx wrangler secret put BOT_NAME  # Optional, defaults to "AI"
 ```
 
 #### 4. Deploy
@@ -62,7 +62,7 @@ npx wrangler deploy
 |---|---|---|
 | `ELEVENLABS_API_KEY` | ✅ | Your ElevenLabs API key |
 | `VOICE_ID` | ✅ | Voice ID (cloned or pre-made) |
-| `BOT_NAME` | ❌ | Display name in the player (default: "River") |
+| `BOT_NAME` | ❌ | Display name in the player (default: "AI") |
 
 ### API Endpoints
 
@@ -160,7 +160,7 @@ npx wrangler deploy
 |---|---|---|
 | `ELEVENLABS_API_KEY` | ✅ | ElevenLabs API 密钥 |
 | `VOICE_ID` | ✅ | 声音 ID（克隆或预设） |
-| `BOT_NAME` | ❌ | 播放器显示名称（默认 "River"） |
+| `BOT_NAME` | ❌ | 播放器显示名称（默认 "AI"） |
 
 ### 获取 Voice ID
 
