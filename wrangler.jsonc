@@ -6,6 +6,9 @@
   "observability": {
     "enabled": true
   },
+  "kv_namespaces": [
+    { "binding": "VOICE_AUDIO", "id": "edccd3ed11c2448280435935695aca35" }
+  ],
   "alias": {
     "ai": "./src/shim-ai.ts"
   }

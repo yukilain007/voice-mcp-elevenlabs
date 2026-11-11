@@ -20,6 +20,7 @@ export interface Env {
   ELEVENLABS_API_KEY: string;
   VOICE_ID: string;
   BOT_NAME?: string;
+  VOICE_AUDIO?: KVNamespace;
 }
 
 // =============================================================================
@@ -28,6 +29,8 @@ export interface Env {
 
 const EXT_APPS_MIME = "text/html;profile=mcp-app" as const;
 const VOICE_RESOURCE_URI = "ui://voice-mcp/player.html";
+// 音频在 KV 里保留 180 天；32kbps 约 4KB/秒，免费 1GB 够存七十多小时
+const AUDIO_TTL_SECONDS = 180 * 24 * 3600;
 
 // =============================================================================
 // Audio Player HTML (WeChat-style UI)
@@ -169,8 +172,7 @@ function getPlayerHTML(botName: string): string {
       return heights.map(h => '<div class="wave-bar" style="height:' + h + '%"></div>').join('');
     }
 
-    function renderPlayer(text, audioBase64) {
-      const audioUrl = 'data:audio/mpeg;base64,' + audioBase64;
+    function renderPlayer(text, audioUrl) {
 
       contentEl.innerHTML =
         '<div class="player">' +
@@ -191,12 +193,23 @@ function getPlayerHTML(botName: string): string {
       const bars = waveform.querySelectorAll('.wave-bar');
 
       audio.addEventListener('loadedmetadata', function() {
-        durationEl.textContent = formatTime(audio.duration);
+        if (isFinite(audio.duration)) durationEl.textContent = formatTime(audio.duration);
+      });
+
+      // 宿主沙箱不放行外链音频时的兜底：让宿主在浏览器里打开链接
+      audio.addEventListener('error', function() {
+        if (audioUrl.indexOf('data:') === 0) { durationEl.textContent = '!'; return; }
+        durationEl.innerHTML = '<a href="#" id="openLink" style="color:#07c160;text-decoration:none">打开</a>';
+        document.getElementById('openLink').addEventListener('click', function(e) {
+          e.preventDefault();
+          sendToHost('ui/open-link', { url: audioUrl }, 2);
+        });
+        notifyHeight();
       });
 
       playBtn.addEventListener('click', function() {
         if (audio.paused) {
-          audio.play();
+          audio.play().catch(function() {});
         } else {
           audio.pause();
         }
@@ -307,8 +320,10 @@ function getPlayerHTML(botName: string): string {
 
     function handleData(data) {
       if (data.error) { showError(data.error); return; }
-      if (data.audio_base64 && data.text) {
-        renderPlayer(data.text, data.audio_base64);
+      if (data.text && data.audio_url) {
+        renderPlayer(data.text, data.audio_url);
+      } else if (data.text && data.audio_base64) {
+        renderPlayer(data.text, 'data:audio/mpeg;base64,' + data.audio_base64);
       }
     }
 
@@ -323,6 +338,8 @@ function getPlayerHTML(botName: string): string {
     window.addEventListener('message', function(event) {
       const msg = event.data;
       if (!msg || typeof msg !== 'object') return;
+
+      if (msg.jsonrpc === '2.0' && msg.id === 2) return; // open-link 回执
 
       if (msg.jsonrpc === '2.0' && msg.id === 1 && !hostInitialized && msg.method === undefined) {
         if ('error' in msg) {
@@ -369,9 +386,11 @@ function getPlayerHTML(botName: string): string {
 // ElevenLabs API Helper
 // =============================================================================
 
-async function generateAudio(env: Env, text: string): Promise<{ success: boolean; audio_base64?: string; error?: string }> {
+async function generateAudio(env: Env, text: string): Promise<{ success: boolean; bytes?: Uint8Array; error?: string }> {
   try {
-    const url = `https://api.elevenlabs.io/v1/text-to-speech/${env.VOICE_ID}`;
+    // 32kbps 单声道足够人声；默认 128kbps 会让长句的 base64 结果超过 2MB，
+    // 宿主收不下导致播放器卡在加载（2026-11-11 排查）。
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${env.VOICE_ID}?output_format=mp3_22050_32`;
 
     const response = await fetch(url, {
       method: 'POST',
@@ -386,6 +405,7 @@ async function generateAudio(env: Env, text: string): Promise<{ success: boolean
         voice_settings: {
           stability: 0.5,
           similarity_boost: 0.75,
+          speed: 0.9, // flash 模型默认偏快，Yuki 2026-10-02 要求慢一成
         },
       }),
     });
@@ -395,28 +415,28 @@ async function generateAudio(env: Env, text: string): Promise<{ success: boolean
       return { success: false, error: `ElevenLabs API error ${response.status}: ${errBody}` };
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-
-    let binary = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.slice(i, i + chunkSize);
-      binary += String.fromCharCode.apply(null, Array.from(chunk));
-    }
-    const base64Audio = btoa(binary);
-
-    return { success: true, audio_base64: base64Audio };
+    return { success: true, bytes: new Uint8Array(await response.arrayBuffer()) };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+function toBase64(bytes: Uint8Array): string {
+
+  // 直接用 subarray 视图，省掉逐块复制成普通数组的 CPU（免费套餐只有 10ms）
+  const parts: string[] = [];
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]));
+  }
+    return btoa(parts.join(''));
 }
 
 // =============================================================================
 // MCP Server Factory
 // =============================================================================
 
-function createVoiceServer(env: Env): McpServer {
+function createVoiceServer(env: Env, origin: string): McpServer {
   const botName = env.BOT_NAME || 'AI';
   const PLAYER_HTML = getPlayerHTML(botName);
 
@@ -434,13 +454,15 @@ function createVoiceServer(env: Env): McpServer {
   server.resource(
     VOICE_RESOURCE_URI,
     VOICE_RESOURCE_URI,
-    { mimeType: EXT_APPS_MIME, description: "Voice Player" },
+    { mimeType: EXT_APPS_MIME, description: "Voice Player", _meta: { ui: { csp: { resourceDomains: [origin], connectDomains: [origin] } } } },
     async () => ({
       contents: [
         {
           uri: VOICE_RESOURCE_URI,
           mimeType: EXT_APPS_MIME,
           text: PLAYER_HTML,
+          // MCP Apps：放行播放器从本 worker 加载音频
+          _meta: { ui: { csp: { resourceDomains: [origin], connectDomains: [origin] } } },
         },
       ],
     }),
@@ -462,14 +484,28 @@ function createVoiceServer(env: Env): McpServer {
     async ({ text }) => {
       const result = await generateAudio(env, text);
 
-      if (result.success && result.audio_base64) {
+      if (result.success && result.bytes) {
+        // 音频存 KV、结果只带链接：base64 塞进结果会被宿主按 token 计，长句直接超限
+        if (env.VOICE_AUDIO) {
+          const id = crypto.randomUUID();
+          await env.VOICE_AUDIO.put(id, result.bytes, { expirationTtl: AUDIO_TTL_SECONDS });
+          return {
+            content: [
+              { type: "text" as const, text: `🎙️ ${botName} says: "${text}"` },
+            ],
+            structuredContent: {
+              text: text,
+              audio_url: `${origin}/audio/${id}.mp3`,
+            },
+          };
+        }
         return {
           content: [
             { type: "text" as const, text: `🎙️ ${botName} says: "${text}"` },
           ],
           structuredContent: {
             text: text,
-            audio_base64: result.audio_base64,
+            audio_base64: toBase64(result.bytes),
           },
         };
       }
@@ -509,13 +545,44 @@ export default {
 
     // MCP Endpoint
     if (path === '/mcp' || path === '/mcp/' || path === '/sse') {
-      const server = createVoiceServer(env);
+      const server = createVoiceServer(env, url.origin);
       const handler = createMcpHandler(server, {
         route: null as unknown as string,
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
       return handler(request, env, ctx);
+    }
+
+    // Stored audio (KV), with Range support for iOS Safari
+    const audioMatch = path.match(/^\/audio\/([0-9a-f-]{36})\.mp3$/);
+    if (audioMatch && (request.method === 'GET' || request.method === 'HEAD')) {
+      if (!env.VOICE_AUDIO) return new Response('Not Found', { status: 404, headers: corsHeaders });
+      const buf = await env.VOICE_AUDIO.get(audioMatch[1], 'arrayBuffer');
+      if (!buf) return new Response('Not Found', { status: 404, headers: corsHeaders });
+      const total = buf.byteLength;
+      const baseHeaders: Record<string, string> = {
+        ...corsHeaders,
+        'Content-Type': 'audio/mpeg',
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      };
+      const range = request.headers.get('Range');
+      const m = range && range.match(/^bytes=(\d*)-(\d*)$/);
+      if (m && (m[1] || m[2])) {
+        let start = m[1] ? parseInt(m[1], 10) : total - parseInt(m[2], 10);
+        let end = m[1] && m[2] ? parseInt(m[2], 10) : total - 1;
+        start = Math.max(0, start); end = Math.min(end, total - 1);
+        if (start > end) {
+          return new Response(null, { status: 416, headers: { ...baseHeaders, 'Content-Range': `bytes */${total}` } });
+        }
+        const body = request.method === 'HEAD' ? null : buf.slice(start, end + 1);
+        return new Response(body, {
+          status: 206,
+          headers: { ...baseHeaders, 'Content-Range': `bytes ${start}-${end}/${total}`, 'Content-Length': String(end - start + 1) },
+        });
+      }
+      return new Response(request.method === 'HEAD' ? null : buf, { headers: { ...baseHeaders, 'Content-Length': String(total) } });
     }
 
     // Status check
@@ -541,14 +608,8 @@ export default {
 
       const result = await generateAudio(env, text);
 
-      if (result.success && result.audio_base64) {
-        const binaryString = atob(result.audio_base64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-
-        return new Response(bytes, {
+      if (result.success && result.bytes) {
+        return new Response(result.bytes, {
           headers: {
             ...corsHeaders,
             'Content-Type': 'audio/mpeg',
